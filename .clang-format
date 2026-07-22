@@ -1,0 +1,8 @@
+BasedOnStyle: Google
+ColumnLimit: 110
+IndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+SortIncludes: true
+DerivePointerAlignment: false
+PointerAlignment: Left
