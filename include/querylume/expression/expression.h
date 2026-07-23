@@ -23,7 +23,7 @@ public:
     explicit EvaluationResult(std::reference_wrapper<const Value> borrowed) : storage_(borrowed) {}
     explicit EvaluationResult(Value owned) : storage_(std::move(owned)) {}
 
-    const Value& value() const noexcept {
+    const Value& value() const {
         if (const auto* borrowed = std::get_if<std::reference_wrapper<const Value>>(&storage_)) {
             return borrowed->get();
         }
