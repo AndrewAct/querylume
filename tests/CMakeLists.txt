@@ -2,6 +2,7 @@ include(GoogleTest)
 
 add_executable(querylume_tests
   unit/value_test.cpp
+  unit/expression_test.cpp
   unit/schema_test.cpp
   unit/json_loader_test.cpp
   unit/pipeline_parser_test.cpp
@@ -19,3 +20,13 @@ target_link_libraries(querylume_tests PRIVATE
 )
 
 gtest_discover_tests(querylume_tests)
+
+if(TARGET querylume)
+  add_test(
+    NAME QueryLumeCliTest
+    COMMAND "${CMAKE_COMMAND}"
+      "-DQUERYLUME_EXE=$<TARGET_FILE:querylume>"
+      "-DQUERYLUME_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cli_test.cmake"
+  )
+endif()

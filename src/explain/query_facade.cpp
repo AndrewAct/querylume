@@ -7,6 +7,7 @@
 #include "querylume/optimizer/optimizer.h"
 #include "querylume/parser/pipeline_parser.h"
 #include "querylume/physical/physical_planner.h"
+#include "querylume/physical/plan_stage_execution_guard.h"
 
 namespace querylume {
 
@@ -14,7 +15,6 @@ namespace {
 
 struct PlannedQuery {
     ParsedPipeline parsed;
-    std::unique_ptr<LogicalPlanNode> logical_root;
     nlohmann::json logical_plan_json;
     OptimizationContext optimization_context;
     nlohmann::json optimized_logical_plan_json;
@@ -26,15 +26,18 @@ struct PlannedQuery {
 PlannedQuery planQuery(const std::shared_ptr<const Table>& table, const nlohmann::json& pipeline_json) {
     PlannedQuery planned;
     planned.parsed = parsePipeline(pipeline_json);
-    planned.logical_root = bindPipeline(table, planned.parsed);
-    planned.logical_plan_json = toJson(*planned.logical_root);
+    auto logical_root = bindPipeline(table, planned.parsed);
+    planned.logical_plan_json = toJson(*logical_root);
 
     Optimizer optimizer;
-    planned.optimization_context = optimizer.optimize(planned.logical_root);
-    planned.optimized_logical_plan_json = toJson(*planned.logical_root);
-    planned.output_schema = outputSchemaOf(*planned.logical_root);
+    planned.optimization_context = optimizer.optimize(logical_root);
+    planned.optimized_logical_plan_json = toJson(*logical_root);
+    planned.output_schema = outputSchemaOf(*logical_root);
 
-    planned.physical_root = buildPhysicalPlan(*planned.logical_root, &planned.leaf_scan);
+    // Physical planning consumes the logical tree. The two stable JSON
+    // snapshots above deliberately preserve the before/after logical views
+    // needed by EXPLAIN without retaining a half-moved logical object graph.
+    planned.physical_root = buildPhysicalPlan(std::move(logical_root), &planned.leaf_scan);
     return planned;
 }
 
@@ -46,12 +49,13 @@ QueryResult runPipeline(const std::shared_ptr<const Table>& table, const nlohman
     QueryResult result;
     result.output_schema = planned.output_schema;
 
-    planned.physical_root->open();
-    Row row;
-    while (planned.physical_root->getNext(row) == StageState::kAdvanced) {
-        result.rows.push_back(std::move(row));
+    {
+        PlanStageExecutionGuard execution(*planned.physical_root);
+        Row row;
+        while (planned.physical_root->getNext(row) == StageState::kAdvanced) {
+            result.rows.push_back(std::move(row));
+        }
     }
-    planned.physical_root->close();
 
     return result;
 }
@@ -73,13 +77,14 @@ nlohmann::json explainAnalyzePipeline(const std::shared_ptr<const Table>& table,
                                       const nlohmann::json& pipeline_json, bool include_results) {
     PlannedQuery planned = planQuery(table, pipeline_json);
 
-    planned.physical_root->open();
     std::vector<Row> rows;
-    Row row;
-    while (planned.physical_root->getNext(row) == StageState::kAdvanced) {
-        rows.push_back(std::move(row));
+    {
+        PlanStageExecutionGuard execution(*planned.physical_root);
+        Row row;
+        while (planned.physical_root->getNext(row) == StageState::kAdvanced) {
+            rows.push_back(std::move(row));
+        }
     }
-    planned.physical_root->close();
 
     GlobalStats global;
     global.documents_examined = planned.leaf_scan != nullptr ? planned.leaf_scan->stats().rows_out : 0;

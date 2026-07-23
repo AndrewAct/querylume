@@ -23,9 +23,19 @@ void PlanStageBase::open() {
     }
     ++stats_.open_calls;
     const auto start = Clock::now();
-    onOpen();
-    stats_.execution_time_micros += microsSince(start);
-    state_ = LifecycleState::kOpen;
+    try {
+        onOpen();
+        stats_.execution_time_micros += microsSince(start);
+        state_ = LifecycleState::kOpen;
+    } catch (...) {
+        // A blocking stage can fail after opening or partially consuming its
+        // child. Roll that partial tree back immediately because the caller's
+        // RAII guard is not fully constructed when open() itself throws.
+        stats_.execution_time_micros += microsSince(start);
+        onClose();
+        state_ = LifecycleState::kClosed;
+        throw;
+    }
 }
 
 StageState PlanStageBase::getNext(Row& output) {

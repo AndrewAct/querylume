@@ -38,7 +38,8 @@ unresolved reference against a `Schema`, in pipeline order, threading the
 resolves against the projected schema, not the original input schema. This
 is where every semantic check lives: field existence (`kUnknownField`),
 operator support (`kUnsupportedOperator`), sort direction validity
-(`kInvalidSortDirection`), and limit non-negativity (`kInvalidLimit`). The
+(`kInvalidSortDirection`), projection-field uniqueness, and limit
+non-negativity (`kInvalidLimit`). The
 binder's output is a `LogicalPlanNode` tree whose field references are
 `BoundFieldExpression`s holding a resolved column index -- no stage ever
 looks up a field by name again after this point.
@@ -61,6 +62,13 @@ mapping between the two (`LogicalFilter` -> `FilterStage`, `LogicalTopK` ->
 `TopKStage`, etc.), converted via a `switch` on `LogicalNodeKind` --
 deliberately not a general visitor framework, since there are exactly six
 closed node kinds in this MVP.
+
+`buildPhysicalPlan(std::unique_ptr<LogicalPlanNode>)` consumes the logical
+tree. This is an important ownership boundary, not an incidental API detail:
+expressions move from logical Filter nodes into executable FilterStage
+objects, so retaining the old logical tree would leave a partially moved
+object graph. EXPLAIN serializes stable before/after logical JSON snapshots
+first, then transfers the whole optimized tree exactly once.
 
 Keeping these separate is what lets the optimizer rewrite the *logical*
 tree (Sort+Limit -> TopK) without touching any execution code, and lets
@@ -101,12 +109,20 @@ it):
   times, and safe to call without ever reaching EOF.
 - Empty input is well-defined: `open()` succeeds, the first `getNext()`
   returns `kEof`.
+- If `open()` fails after partially opening a child, `PlanStageBase`
+  immediately closes that partial subtree before rethrowing.
 
 `PlanStageBase` also owns all per-stage timing (wrapping each `onOpen()`/
 `onGetNext()` call in a `steady_clock` measurement) and call-count
 statistics, so concrete stages (`FilterStage`, `SortStage`, ...) only
 implement `onOpen()`/`onGetNext()`/`onClose()` and never touch lifecycle
 state directly.
+
+Top-level execution is wrapped in `PlanStageExecutionGuard`. Its destructor
+calls `close()`, so exceptions from predicate evaluation, sorting, or result
+collection follow the same cleanup path as successful execution. Blocking
+stages also release their materialized row buffers during `close()`, rather
+than waiting for the stage objects to be destroyed.
 
 ## Ownership model
 
@@ -118,7 +134,8 @@ state directly.
 - Every logical node owns its child the same way
   (`std::unique_ptr<LogicalPlanNode>`), plus a mutable accessor
   (`mutableChild()`) used by the optimizer rule to detach and reattach
-  subtrees during rewriting, and by the physical planner to recurse.
+  subtrees during rewriting. The physical planner then consumes the root
+  unique_ptr and moves child ownership recursively into the PlanStage tree.
 - `LogicalScan` and `CollectionScanStage` hold the input `Table` via
   `std::shared_ptr<const Table>` rather than uniquely: the same loaded data
   can back two independently-bound logical plans (used by the
@@ -129,6 +146,9 @@ state directly.
   `std::unique_ptr<Expression>`, transferred by move from `LogicalFilter`
   into `FilterStage` at physical-planning time
   (`LogicalFilter::takePredicate()`).
+- Expression evaluation returns an `EvaluationResult`: field and literal
+  nodes borrow an existing `Value`, while comparison/AND nodes own their new
+  boolean. This avoids copying string cells in the Filter hot path.
 
 ## Blocking vs. streaming operators
 

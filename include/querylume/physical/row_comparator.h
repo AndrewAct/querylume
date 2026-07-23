@@ -2,14 +2,10 @@
 
 #include <cstddef>
 
+#include "querylume/common/sort_direction.h"
 #include "querylume/data/row.h"
 
 namespace querylume {
-
-enum class SortDirection {
-    kAscending,
-    kDescending,
-};
 
 // Single shared ordering abstraction used by BOTH SortStage and TopKStage so
 // the two stages cannot accidentally implement different tie-breaking or

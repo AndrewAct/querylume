@@ -26,13 +26,28 @@ add_library(querylume_core
   explain/query_facade.cpp
 )
 
+add_library(QueryLume::Core ALIAS querylume_core)
+
 target_include_directories(querylume_core PUBLIC
-  ${CMAKE_SOURCE_DIR}/include
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_link_libraries(querylume_core PUBLIC
-  nlohmann_json::nlohmann_json
-  querylume_warnings
+target_link_libraries(querylume_core
+  PRIVATE
+    $<BUILD_INTERFACE:querylume_warnings>
 )
 
 target_compile_features(querylume_core PUBLIC cxx_std_17)
+
+set_target_properties(querylume_core PROPERTIES EXPORT_NAME Core)
+
+install(
+  TARGETS querylume_core
+  EXPORT QueryLumeTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)

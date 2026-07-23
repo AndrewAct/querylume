@@ -97,8 +97,10 @@ child's inclusive time, documented here rather than computed automatically.
 Documented at the point of implementation (`include/querylume/data/value.h`)
 and repeated here for visibility:
 
-- `int64_t` and `double` compare numerically; mixed-type numeric comparison
-  is allowed and promotes the integer to `double`.
+- `int64_t` and `double` compare numerically. Integer/integer comparisons stay
+  exact, and mixed comparisons use range and fractional-part checks instead of
+  blindly converting the integer to `double`; this preserves distinctions above
+  2^53 and avoids undefined out-of-range floating-point-to-integer casts.
 - Strings compare lexicographically (byte-wise `std::string::operator<`).
 - Booleans support only `==`/`!=`; ordered comparison between two booleans
   throws `QueryLumeError(kIncompatibleTypes)`.
@@ -140,13 +142,48 @@ matters more for this MVP than absolute accuracy: `peak_memory_bytes` is a
 diagnostic signal in EXPLAIN ANALYZE output, not a memory-limit enforcement
 mechanism (there is no memory limiting in this MVP).
 
-## Why the physical planner takes a mutable logical-node reference
+## Why physical planning consumes the logical plan
 
-`buildPhysicalPlan(LogicalPlanNode&)` needs regular (non-const) access
-because `LogicalFilter::takePredicate()` moves the uniquely-owned
-`Expression` tree out of the logical node and into the new `FilterStage`.
-Every other logical node's payload (column indices, field names, sort
-direction, limit/k) is cheap to copy, so only `Filter` needs the move. This
-is safe because EXPLAIN always serializes the logical plan to JSON *before*
-physical planning runs, so the logical tree is fully read before anything
-is moved out of it (see `explain::planQuery` in `query_facade.cpp`).
+`buildPhysicalPlan(std::unique_ptr<LogicalPlanNode>)` deliberately takes
+ownership of the logical root. A filter owns its expression with
+`std::unique_ptr`, and physical planning moves that expression into the
+corresponding `FilterStage`; recursively, it also moves ownership of every
+child node. The function therefore consumes the logical tree rather than
+quietly leaving a half-moved tree behind a mutable reference.
+
+EXPLAIN captures the pre-optimization and post-optimization logical JSON
+snapshots before calling the physical planner. This ordering is explicit in
+`explain::planQuery`: after ownership is transferred, there is no logical tree
+left to inspect accidentally. An alternative would be a deep `clone()` on
+every expression and plan node, but that adds allocation and maintenance cost
+without serving an MVP requirement.
+
+## Why schema order is lexicographic
+
+JSON object members are semantically unordered, and `nlohmann::json` uses an
+ordered map for objects by default. QueryLume therefore constructs the union
+schema in lexicographic field-name order rather than promising the visual order
+in which keys happened to appear in an input document. This gives identical
+column indices, plans, and EXPLAIN output for semantically identical JSON whose
+members were written in different orders.
+
+## Why predicate evaluation can borrow values
+
+A bound field expression often refers directly to a cell already stored in the
+input row. Returning a complete `Value` from every expression would copy that
+cell, including allocating for strings, once per predicate evaluation. The
+`EvaluationResult` type can instead hold either a borrowed `const Value&` or an
+owned temporary. Bound fields and literals borrow; comparisons and conjunctions
+own their computed boolean result. The result object keeps this lifetime choice
+explicit while avoiding copies in the common field-access path.
+
+## Why there is no per-row debug logging
+
+Logging inside `getNext()` or expression evaluation would add formatting,
+branching, synchronization, and potentially I/O to QueryLume's hottest path.
+It can also produce unbounded output for a large input. The MVP instead exposes
+structured observability through EXPLAIN, EXPLAIN ANALYZE, optimizer traces, and
+per-stage counters/timing. Comments explain ownership and lifecycle rules in
+the implementation. If operational logging is added later, it should be an
+optional injected interface, disabled by default, with coarse query/lifecycle
+events rather than one message per row.

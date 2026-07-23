@@ -2,14 +2,14 @@
 
 namespace querylume {
 
-Value ConjunctionExpression::evaluate(const Row& row) const {
+EvaluationResult ConjunctionExpression::evaluate(const Row& row) const {
     for (const auto& operand : operands_) {
-        const Value v = operand->evaluate(row);
-        if (!std::get<bool>(v)) {
-            return false;
+        const EvaluationResult result = operand->evaluate(row);
+        if (!std::get<bool>(result.value())) {
+            return EvaluationResult(Value(false));
         }
     }
-    return true;
+    return EvaluationResult(Value(true));
 }
 
 std::string ConjunctionExpression::describe() const {

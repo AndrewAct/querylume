@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <nlohmann/json.hpp>
 
 #include "querylume/common/error.h"
@@ -30,7 +31,13 @@ TEST(PipelineParserTest, ParsesValidPipeline) {
 
 TEST(PipelineParserTest, UnknownStageThrows) {
     auto json = nlohmann::json::parse(R"([{"$group": {}}])");
-    EXPECT_THROW(parsePipeline(json), QueryLumeError);
+    try {
+        static_cast<void>(parsePipeline(json));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kUnknownStage);
+        EXPECT_NE(std::string(error.what()).find("$group"), std::string::npos);
+    }
 }
 
 TEST(PipelineParserTest, MatchPredicateMustBeSingleKeyObject) {
@@ -56,6 +63,30 @@ TEST(PipelineParserTest, LimitMustBeInteger) {
 TEST(PipelineParserTest, PipelineMustBeArray) {
     auto json = nlohmann::json::parse(R"({"$limit": 10})");
     EXPECT_THROW(parsePipeline(json), QueryLumeError);
+}
+
+TEST(PipelineParserTest, RejectsComparisonIntegerOutsideInt64Range) {
+    nlohmann::json pipeline = nlohmann::json::array();
+    pipeline.push_back({{"$match", {{"value", {{"$eq", std::numeric_limits<std::uint64_t>::max()}}}}}});
+    try {
+        static_cast<void>(parsePipeline(pipeline));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kUnsupportedValueType);
+        EXPECT_NE(std::string(error.what()).find("outside the int64 range"), std::string::npos);
+    }
+}
+
+TEST(PipelineParserTest, RejectsLimitOutsideInt64Range) {
+    nlohmann::json pipeline =
+        nlohmann::json::array({{{"$limit", std::numeric_limits<std::uint64_t>::max()}}});
+    try {
+        static_cast<void>(parsePipeline(pipeline));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kPipelineSyntaxError);
+        EXPECT_NE(std::string(error.what()).find("signed 64-bit"), std::string::npos);
+    }
 }
 
 }  // namespace

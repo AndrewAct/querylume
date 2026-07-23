@@ -4,8 +4,8 @@
 #include <memory>
 #include <string>
 
+#include "querylume/common/sort_direction.h"
 #include "querylume/logical/logical_plan_node.h"
-#include "querylume/physical/row_comparator.h"
 
 namespace querylume {
 

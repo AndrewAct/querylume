@@ -14,7 +14,9 @@ public:
     BoundFieldExpression(std::size_t column_index, std::string field_name)
         : column_index_(column_index), field_name_(std::move(field_name)) {}
 
-    Value evaluate(const Row& row) const override { return row.values.at(column_index_); }
+    EvaluationResult evaluate(const Row& row) const override {
+        return EvaluationResult(std::cref(row.values.at(column_index_)));
+    }
 
     std::string describe() const override { return field_name_; }
 

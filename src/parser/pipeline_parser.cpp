@@ -1,5 +1,7 @@
 #include "querylume/parser/pipeline_parser.h"
 
+#include <limits>
+
 #include "querylume/common/error.h"
 
 namespace querylume {
@@ -13,8 +15,15 @@ Value jsonToLiteral(const nlohmann::json& value) {
         case nlohmann::json::value_t::boolean:
             return value.get<bool>();
         case nlohmann::json::value_t::number_integer:
-        case nlohmann::json::value_t::number_unsigned:
-            return value.get<int64_t>();
+            return value.get<std::int64_t>();
+        case nlohmann::json::value_t::number_unsigned: {
+            const auto unsigned_value = value.get<std::uint64_t>();
+            if (unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                throw QueryLumeError(ErrorCode::kUnsupportedValueType,
+                                     "comparison integer literal is outside the int64 range");
+            }
+            return static_cast<std::int64_t>(unsigned_value);
+        }
         case nlohmann::json::value_t::number_float:
             return value.get<double>();
         case nlohmann::json::value_t::string:
@@ -27,6 +36,19 @@ Value jsonToLiteral(const nlohmann::json& value) {
 
 [[noreturn]] void syntaxError(const std::string& message) {
     throw QueryLumeError(ErrorCode::kPipelineSyntaxError, message);
+}
+
+std::int64_t parseInt64(const nlohmann::json& value, const std::string& context) {
+    if (value.type() == nlohmann::json::value_t::number_integer) {
+        return value.get<std::int64_t>();
+    }
+    if (value.type() == nlohmann::json::value_t::number_unsigned) {
+        const auto unsigned_value = value.get<std::uint64_t>();
+        if (unsigned_value <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+            return static_cast<std::int64_t>(unsigned_value);
+        }
+    }
+    syntaxError(context + " must fit in a signed 64-bit integer");
 }
 
 ParsedMatchStage parseMatch(const nlohmann::json& value) {
@@ -74,7 +96,7 @@ ParsedSortStage parseSort(const nlohmann::json& value) {
     }
     ParsedSortStage stage;
     stage.field.field_name = it.key();
-    stage.direction_raw = it.value().get<std::int64_t>();
+    stage.direction_raw = parseInt64(it.value(), "$sort direction for field '" + it.key() + "'");
     return stage;
 }
 
@@ -83,7 +105,7 @@ ParsedLimitStage parseLimit(const nlohmann::json& value) {
         syntaxError("$limit value must be an integer");
     }
     ParsedLimitStage stage;
-    stage.count_raw = value.get<std::int64_t>();
+    stage.count_raw = parseInt64(value, "$limit value");
     return stage;
 }
 

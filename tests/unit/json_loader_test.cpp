@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "querylume/common/error.h"
 
 namespace querylume {
@@ -13,6 +15,11 @@ TEST(JsonLoaderTest, InfersDeterministicSchema) {
     EXPECT_EQ(table.rows.size(), 2u);
     EXPECT_EQ(table.rows[0].ordinal, 0u);
     EXPECT_EQ(table.rows[1].ordinal, 1u);
+}
+
+TEST(JsonLoaderTest, SchemaUsesCanonicalLexicographicOrder) {
+    Table table = loadTableFromJsonText(R"([{"z":1,"a":2},{"middle":3}])");
+    EXPECT_EQ(table.schema.fields(), (std::vector<std::string>{"a", "middle", "z"}));
 }
 
 TEST(JsonLoaderTest, MissingFieldsBecomeNull) {
@@ -41,7 +48,25 @@ TEST(JsonLoaderTest, RejectsNonArrayTopLevel) {
 }
 
 TEST(JsonLoaderTest, RejectsMalformedJson) {
-    EXPECT_THROW(loadTableFromJsonText("not json"), QueryLumeError);
+    try {
+        static_cast<void>(loadTableFromJsonText("not json"));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kJsonParseError);
+        EXPECT_NE(std::string(error.what()).find("failed to parse JSON"), std::string::npos);
+    }
+}
+
+TEST(JsonLoaderTest, RejectsUnsignedIntegerOutsideInt64Range) {
+    const nlohmann::json input =
+        nlohmann::json::array({{{"value", std::numeric_limits<std::uint64_t>::max()}}});
+    try {
+        static_cast<void>(loadTableFromJson(input));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kUnsupportedValueType);
+        EXPECT_NE(std::string(error.what()).find("outside the int64 range"), std::string::npos);
+    }
 }
 
 }  // namespace

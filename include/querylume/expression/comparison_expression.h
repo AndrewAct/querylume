@@ -16,7 +16,7 @@ public:
                          std::unique_ptr<Expression> rhs)
         : lhs_(std::move(lhs)), op_(op), rhs_(std::move(rhs)) {}
 
-    Value evaluate(const Row& row) const override;
+    EvaluationResult evaluate(const Row& row) const override;
     std::string describe() const override;
 
 private:

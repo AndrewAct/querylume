@@ -8,7 +8,9 @@ class LiteralExpression final : public Expression {
 public:
     explicit LiteralExpression(Value value) : value_(std::move(value)) {}
 
-    Value evaluate(const Row& /*row*/) const override { return value_; }
+    EvaluationResult evaluate(const Row& /*row*/) const override {
+        return EvaluationResult(std::cref(value_));
+    }
 
     std::string describe() const override;
 

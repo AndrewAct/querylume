@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <random>
 
 #include "querylume/common/error.h"
 #include "querylume/expression/bound_field_expression.h"
@@ -9,6 +10,7 @@
 #include "querylume/physical/collection_scan_stage.h"
 #include "querylume/physical/filter_stage.h"
 #include "querylume/physical/limit_stage.h"
+#include "querylume/physical/plan_stage_execution_guard.h"
 #include "querylume/physical/project_stage.h"
 #include "querylume/physical/sort_stage.h"
 #include "querylume/physical/topk_stage.h"
@@ -101,20 +103,24 @@ TEST(ProjectStageTest, EmitsSelectedColumnsAndPreservesOrdinal) {
 
 TEST(LimitStageTest, StopsAfterKRows) {
     auto scan = std::make_unique<CollectionScanStage>(makeTable());
+    CollectionScanStage* scan_observer = scan.get();
     LimitStage stage(std::move(scan), 2);
     stage.open();
     auto rows = drain(stage);
     stage.close();
     EXPECT_EQ(rows.size(), 2u);
+    EXPECT_EQ(scan_observer->stats().rows_out, 2u);
 }
 
 TEST(LimitStageTest, ZeroLimitReturnsEofImmediately) {
     auto scan = std::make_unique<CollectionScanStage>(makeTable());
+    CollectionScanStage* scan_observer = scan.get();
     LimitStage stage(std::move(scan), 0);
     stage.open();
     Row row;
     EXPECT_EQ(stage.getNext(row), StageState::kEof);
     stage.close();
+    EXPECT_EQ(scan_observer->stats().rows_out, 0u);
 }
 
 TEST(SortStageTest, SortsAscending) {
@@ -271,6 +277,112 @@ TEST(TopKStageTest, EmptyInput) {
     Row row;
     EXPECT_EQ(stage.getNext(row), StageState::kEof);
     stage.close();
+}
+
+TEST(TopKStageTest, RandomizedResultsMatchSortAndLimitWithNullsTiesAndMixedNumerics) {
+    auto table = std::make_shared<Table>();
+    table->schema = Schema({"v"});
+
+    std::mt19937 generator(42);
+    std::uniform_int_distribution<int> values(-5, 5);
+    for (std::uint64_t ordinal = 0; ordinal < 200; ++ordinal) {
+        if (ordinal % 13 == 0) {
+            table->rows.push_back(Row{ordinal, {nullptr}});
+        } else if (ordinal % 2 == 0) {
+            table->rows.push_back(Row{ordinal, {static_cast<std::int64_t>(values(generator))}});
+        } else {
+            table->rows.push_back(Row{ordinal, {static_cast<double>(values(generator))}});
+        }
+    }
+
+    for (const SortDirection direction : {SortDirection::kAscending, SortDirection::kDescending}) {
+        for (const std::uint64_t k : {0u, 1u, 3u, 25u, 500u}) {
+            auto expected_scan = std::make_unique<CollectionScanStage>(table);
+            auto expected_sort = std::make_unique<SortStage>(std::move(expected_scan), 0, direction);
+            LimitStage expected_stage(std::move(expected_sort), k);
+            expected_stage.open();
+            const std::vector<Row> expected = drain(expected_stage);
+            expected_stage.close();
+
+            auto actual_scan = std::make_unique<CollectionScanStage>(table);
+            TopKStage actual_stage(std::move(actual_scan), 0, direction, k);
+            actual_stage.open();
+            const std::vector<Row> actual = drain(actual_stage);
+            actual_stage.close();
+
+            ASSERT_EQ(actual.size(), expected.size()) << "k=" << k;
+            for (std::size_t i = 0; i < actual.size(); ++i) {
+                EXPECT_EQ(actual[i].ordinal, expected[i].ordinal) << "k=" << k << ", result index=" << i;
+            }
+        }
+    }
+}
+
+class ThrowingGetNextStage final : public PlanStageBase {
+public:
+    explicit ThrowingGetNextStage(std::shared_ptr<bool> closed) : closed_(std::move(closed)) {}
+
+    std::string stageName() const override { return "ThrowingGetNextStage"; }
+
+protected:
+    void onOpen() override {}
+
+    StageState onGetNext(Row& /*output*/) override {
+        throw QueryLumeError(ErrorCode::kIncompatibleTypes, "intentional test failure");
+    }
+
+    void onClose() noexcept override { *closed_ = true; }
+
+private:
+    std::shared_ptr<bool> closed_;
+};
+
+TEST(PlanStageExecutionGuardTest, ClosesStageWhenGetNextThrows) {
+    auto closed = std::make_shared<bool>(false);
+    ThrowingGetNextStage stage(closed);
+
+    {
+        PlanStageExecutionGuard execution(stage);
+        Row row;
+        EXPECT_THROW(stage.getNext(row), QueryLumeError);
+    }
+
+    EXPECT_TRUE(*closed);
+}
+
+class ThrowingOpenStage final : public PlanStageBase {
+public:
+    explicit ThrowingOpenStage(std::shared_ptr<bool> closed) : closed_(std::move(closed)) {}
+
+    std::string stageName() const override { return "ThrowingOpenStage"; }
+
+protected:
+    void onOpen() override {
+        throw QueryLumeError(ErrorCode::kIncompatibleTypes, "intentional open failure");
+    }
+
+    StageState onGetNext(Row& /*output*/) override { return StageState::kEof; }
+
+    void onClose() noexcept override { *closed_ = true; }
+
+private:
+    std::shared_ptr<bool> closed_;
+};
+
+TEST(PlanStageExecutionGuardTest, FailedOpenRollsBackPartialStageState) {
+    auto closed = std::make_shared<bool>(false);
+    ThrowingOpenStage stage(closed);
+
+    EXPECT_THROW(stage.open(), QueryLumeError);
+    EXPECT_TRUE(*closed);
+
+    Row row;
+    try {
+        static_cast<void>(stage.getNext(row));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kInvalidStageLifecycle);
+    }
 }
 
 }  // namespace

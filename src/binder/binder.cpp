@@ -1,5 +1,7 @@
 #include "querylume/binder/binder.h"
 
+#include <unordered_set>
+
 #include "querylume/common/error.h"
 #include "querylume/expression/bound_field_expression.h"
 #include "querylume/expression/comparison_expression.h"
@@ -83,9 +85,14 @@ std::unique_ptr<LogicalPlanNode> bindPipeline(std::shared_ptr<const Table> table
             case ParsedStageKind::kProject: {
                 std::vector<std::size_t> indices;
                 std::vector<std::string> names;
+                std::unordered_set<std::string> seen_fields;
                 indices.reserve(stage.project.fields.size());
                 names.reserve(stage.project.fields.size());
                 for (const auto& field : stage.project.fields) {
+                    if (!seen_fields.insert(field.field_name).second) {
+                        throw QueryLumeError(ErrorCode::kPipelineSyntaxError,
+                                             "duplicate $project field: '" + field.field_name + "'");
+                    }
                     indices.push_back(resolveField(current_schema, field.field_name));
                     names.push_back(field.field_name);
                 }

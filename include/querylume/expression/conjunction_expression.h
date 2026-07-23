@@ -14,7 +14,7 @@ public:
     explicit ConjunctionExpression(std::vector<std::unique_ptr<Expression>> operands)
         : operands_(std::move(operands)) {}
 
-    Value evaluate(const Row& row) const override;
+    EvaluationResult evaluate(const Row& row) const override;
     std::string describe() const override;
 
 private:

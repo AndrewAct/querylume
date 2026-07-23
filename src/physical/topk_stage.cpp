@@ -40,6 +40,13 @@ StageState TopKStage::onGetNext(Row& output) {
     return StageState::kAdvanced;
 }
 
-void TopKStage::onClose() noexcept { child_->close(); }
+void TopKStage::onClose() noexcept {
+    child_->close();
+
+    // TopK owns up to k complete rows. Release that allocation at close(),
+    // rather than waiting for the stage object itself to be destroyed.
+    std::vector<Row> empty;
+    buffer_.swap(empty);
+}
 
 }  // namespace querylume

@@ -1,12 +1,12 @@
 #include "querylume/explain/json_serialize.h"
 
+#include "querylume/common/sort_direction.h"
 #include "querylume/logical/logical_filter.h"
 #include "querylume/logical/logical_limit.h"
 #include "querylume/logical/logical_project.h"
 #include "querylume/logical/logical_scan.h"
 #include "querylume/logical/logical_sort.h"
 #include "querylume/logical/logical_topk.h"
-#include "querylume/physical/row_comparator.h"
 
 namespace querylume {
 

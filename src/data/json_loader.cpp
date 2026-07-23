@@ -1,6 +1,8 @@
 #include "querylume/data/json_loader.h"
 
 #include <fstream>
+#include <limits>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 
@@ -17,8 +19,15 @@ Value convertScalar(const nlohmann::json& value, const std::string& field) {
         case nlohmann::json::value_t::boolean:
             return value.get<bool>();
         case nlohmann::json::value_t::number_integer:
-        case nlohmann::json::value_t::number_unsigned:
-            return value.get<int64_t>();
+            return value.get<std::int64_t>();
+        case nlohmann::json::value_t::number_unsigned: {
+            const auto unsigned_value = value.get<std::uint64_t>();
+            if (unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                throw QueryLumeError(ErrorCode::kUnsupportedValueType,
+                                     "field '" + field + "' contains an integer outside the int64 range");
+            }
+            return static_cast<std::int64_t>(unsigned_value);
+        }
         case nlohmann::json::value_t::number_float:
             return value.get<double>();
         case nlohmann::json::value_t::string:
@@ -40,19 +49,21 @@ Table loadTableFromJson(const nlohmann::json& document) {
         throw QueryLumeError(ErrorCode::kInvalidDataShape, "input data must be a JSON array of documents");
     }
 
-    std::vector<std::string> field_order;
-    std::unordered_map<std::string, std::size_t> field_index;
+    std::set<std::string> field_names;
 
     for (const auto& doc : document) {
         if (!doc.is_object()) {
             throw QueryLumeError(ErrorCode::kInvalidDataShape, "each input document must be a JSON object");
         }
         for (auto it = doc.begin(); it != doc.end(); ++it) {
-            if (field_index.find(it.key()) == field_index.end()) {
-                field_index.emplace(it.key(), field_order.size());
-                field_order.push_back(it.key());
-            }
+            field_names.insert(it.key());
         }
+    }
+
+    std::vector<std::string> field_order(field_names.begin(), field_names.end());
+    std::unordered_map<std::string, std::size_t> field_index;
+    for (std::size_t i = 0; i < field_order.size(); ++i) {
+        field_index.emplace(field_order[i], i);
     }
 
     Table table;

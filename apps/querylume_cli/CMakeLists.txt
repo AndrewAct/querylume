@@ -6,3 +6,5 @@ target_link_libraries(querylume PRIVATE
   nlohmann_json::nlohmann_json
   querylume_warnings
 )
+
+install(TARGETS querylume RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

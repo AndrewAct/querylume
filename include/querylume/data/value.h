@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <variant>
@@ -8,7 +9,7 @@ namespace querylume {
 
 // A scalar cell value. QueryLume only supports flat scalar documents; nested
 // objects and arrays are rejected during schema inference (see schema.h).
-using Value = std::variant<std::nullptr_t, bool, int64_t, double, std::string>;
+using Value = std::variant<std::nullptr_t, bool, std::int64_t, double, std::string>;
 
 enum class ValueType {
     kNull,
@@ -36,8 +37,8 @@ enum class CompareResult {
 // for rationale):
 //   - int64_t and double compare numerically (mixed comparisons allowed).
 //   - strings compare lexicographically (byte-wise).
-//   - bools support only equality/inequality; ordered comparison is
-//     kUnordered.
+//   - bools support only equality/inequality; ordered comparison throws
+//     QueryLumeError(kIncompatibleTypes).
 //   - null == null is true; null compared for equality with a non-null value
 //     is false; any ordered comparison touching null is kUnordered.
 //   - incompatible non-numeric type pairs (e.g. string vs int64_t) throw

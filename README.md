@@ -53,8 +53,8 @@ concurrency. See the project spec for the full list.
 - `$match`: implicit AND across predicates. Operators: `$eq`, `$ne`, `$lt`,
   `$lte`, `$gt`, `$gte`. No `$or`, `$not`, regex, nested predicates,
   field-to-field comparison, or computed expressions.
-- `$project`: inclusion-only, in the order requested. No computed fields,
-  renames, or exclusion projection.
+- `$project`: inclusion-only, in the order requested. Duplicate fields are
+  rejected. No computed fields, renames, or exclusion projection.
 - `$sort`: exactly one field, direction `1` (ascending) or `-1`
   (descending).
 - `$limit`: a non-negative integer; `0` returns an empty result.
@@ -62,7 +62,8 @@ concurrency. See the project spec for the full list.
 Input data is a flat JSON array of documents (see `examples/stocks.json`).
 Nested objects and arrays as field values are rejected. A document missing
 a field gets `null` for that column. The schema is the union of all field
-names across all documents, ordered by first appearance.
+names across all documents in canonical lexicographic order; JSON object
+member order is not treated as query semantics.
 
 ## Build
 
@@ -83,6 +84,27 @@ Release build:
 cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release
 ```
+
+When QueryLume is embedded with `add_subdirectory()`, the CLI, tests, and
+benchmarks default to `OFF`; a parent project can opt into any of them with
+`QUERYLUME_BUILD_CLI`, `QUERYLUME_BUILD_TESTS`, or
+`QUERYLUME_BUILD_BENCHMARKS`. Link the library through its stable alias:
+
+```cmake
+add_subdirectory(path/to/querylume)
+target_link_libraries(my_app PRIVATE QueryLume::Core)
+```
+
+QueryLume also provides install/export rules:
+
+```sh
+cmake --install build --prefix /desired/prefix
+```
+
+An installed consumer can use `find_package(QueryLume 0.1 REQUIRED)` and
+`QueryLume::Core`. Because nlohmann/json appears in QueryLume's public API,
+version 3.11.3 or newer in the same major version must also be discoverable
+by the consuming CMake project.
 
 Sanitizer builds (each is its own build directory; `-DQUERYLUME_BUILD_BENCHMARKS=OFF`
 is optional but keeps the sanitizer build faster):
@@ -170,10 +192,12 @@ under `result`.
   `Project`/`Sort`/`Limit`/`TopK`, pure data, no execution.
 - **Optimizer** (`querylume/optimizer`): one rule, `SortLimitToTopKRule`,
   run by a small `Optimizer` driver that records a rewrite trace.
-- **Physical planner** (`querylume/physical/physical_planner.h`): lowers
-  the (optimized) logical plan 1:1 into a `PlanStage` tree.
+- **Physical planner** (`querylume/physical/physical_planner.h`): explicitly
+  consumes the optimized logical plan and lowers it 1:1 into an independently
+  owned `PlanStage` tree.
 - **Execution** (`querylume/physical`): Volcano-style pull iterators
-  (`open`/`getNext`/`close`), each owning its child via `unique_ptr`.
+  (`open`/`getNext`/`close`), each owning its child via `unique_ptr`;
+  an RAII guard guarantees closure on success and exceptions.
 - **Explain** (`querylume/explain`): JSON serialization for every stage of
   the above, plus the `run`/`explain`/`explain-analyze` orchestration used
   by the CLI.
@@ -226,7 +250,9 @@ rejection, mixed numeric types), expression evaluation (all comparison
 operators, null/incompatible-type semantics, conjunction), parser/binder
 (valid pipelines and every documented error category), each physical stage
 in isolation (including empty input, `k == 0`, `k > n`, deterministic
-ties), the optimizer rule (adjacent/non-adjacent/missing-half cases, and a
+ties), randomized Sort+Limit-vs-TopK equivalence with nulls and mixed
+numerics, CLI exit/stdout/stderr behavior, the optimizer rule
+(adjacent/non-adjacent/missing-half cases, and a
 rewrite that occurs below the plan root), an optimized-vs-unoptimized
 integration test asserting identical output, and a golden-file test
 pinning EXPLAIN's JSON shape.

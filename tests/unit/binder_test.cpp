@@ -30,6 +30,17 @@ std::unique_ptr<LogicalPlanNode> bind(const std::string& pipeline_text,
     return bindPipeline(table, parsed);
 }
 
+void expectBindError(const std::string& pipeline_text, ErrorCode expected_code,
+                     const std::string& message_fragment) {
+    try {
+        static_cast<void>(bind(pipeline_text));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), expected_code);
+        EXPECT_NE(std::string(error.what()).find(message_fragment), std::string::npos);
+    }
+}
+
 TEST(BinderTest, ValidPipelineProducesExpectedTreeShape) {
     auto root = bind(R"([
         {"$match": {"sector": {"$eq": "technology"}, "price": {"$gte": 200}}},
@@ -57,24 +68,39 @@ TEST(BinderTest, ValidPipelineProducesExpectedTreeShape) {
 }
 
 TEST(BinderTest, UnknownOperatorThrows) {
-    EXPECT_THROW(bind(R"([{"$match": {"price": {"$between": 200}}}])"), QueryLumeError);
+    expectBindError(R"([{"$match": {"price": {"$between": 200}}}])", ErrorCode::kUnsupportedOperator,
+                    "$between");
 }
 
 TEST(BinderTest, UnknownFieldInMatchThrows) {
-    EXPECT_THROW(bind(R"([{"$match": {"nope": {"$eq": 1}}}])"), QueryLumeError);
+    expectBindError(R"([{"$match": {"nope": {"$eq": 1}}}])", ErrorCode::kUnknownField, "nope");
 }
 
 TEST(BinderTest, InvalidProjectionFieldThrows) {
-    EXPECT_THROW(bind(R"([{"$project": ["nope"]}])"), QueryLumeError);
+    expectBindError(R"([{"$project": ["nope"]}])", ErrorCode::kUnknownField, "nope");
 }
 
-TEST(BinderTest, SortFieldMustExist) { EXPECT_THROW(bind(R"([{"$sort": {"nope": 1}}])"), QueryLumeError); }
+TEST(BinderTest, SortFieldMustExist) {
+    expectBindError(R"([{"$sort": {"nope": 1}}])", ErrorCode::kUnknownField, "nope");
+}
 
 TEST(BinderTest, InvalidSortDirectionThrows) {
-    EXPECT_THROW(bind(R"([{"$sort": {"price": 2}}])"), QueryLumeError);
+    expectBindError(R"([{"$sort": {"price": 2}}])", ErrorCode::kInvalidSortDirection, "must be 1 or -1");
 }
 
-TEST(BinderTest, NegativeLimitThrows) { EXPECT_THROW(bind(R"([{"$limit": -1}])"), QueryLumeError); }
+TEST(BinderTest, NegativeLimitThrows) {
+    expectBindError(R"([{"$limit": -1}])", ErrorCode::kInvalidLimit, "non-negative");
+}
+
+TEST(BinderTest, DuplicateProjectionFieldIsRejected) {
+    try {
+        static_cast<void>(bind(R"([{"$project": ["symbol", "symbol"]}])"));
+        FAIL() << "expected QueryLumeError";
+    } catch (const QueryLumeError& error) {
+        EXPECT_EQ(error.code(), ErrorCode::kPipelineSyntaxError);
+        EXPECT_NE(std::string(error.what()).find("duplicate $project field"), std::string::npos);
+    }
+}
 
 TEST(BinderTest, SortAfterProjectResolvesAgainstProjectedSchema) {
     auto root = bind(R"([

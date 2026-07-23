@@ -44,7 +44,7 @@ TEST(OptimizedVsUnoptimizedTest, ProduceIdenticalRowsAndOrder) {
 
     auto unoptimized_root = bindPipeline(table, parsed);
     ASSERT_EQ(unoptimized_root->kind(), LogicalNodeKind::kLimit);
-    auto unoptimized_rows = execute(buildPhysicalPlan(*unoptimized_root));
+    auto unoptimized_rows = execute(buildPhysicalPlan(std::move(unoptimized_root)));
 
     auto optimized_root = bindPipeline(table, parsed);
     Optimizer optimizer;
@@ -52,7 +52,7 @@ TEST(OptimizedVsUnoptimizedTest, ProduceIdenticalRowsAndOrder) {
     ASSERT_EQ(optimized_root->kind(), LogicalNodeKind::kTopK);
     ASSERT_EQ(context.trace.size(), 1u);
     EXPECT_TRUE(context.trace[0].applied);
-    auto optimized_rows = execute(buildPhysicalPlan(*optimized_root));
+    auto optimized_rows = execute(buildPhysicalPlan(std::move(optimized_root)));
 
     ASSERT_EQ(optimized_rows.size(), unoptimized_rows.size());
     for (std::size_t i = 0; i < optimized_rows.size(); ++i) {

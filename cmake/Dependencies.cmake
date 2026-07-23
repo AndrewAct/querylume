@@ -30,7 +30,11 @@ FetchContent_Declare(
   GIT_TAG v1.9.1
 )
 
-FetchContent_MakeAvailable(nlohmann_json CLI11)
+FetchContent_MakeAvailable(nlohmann_json)
+
+if(QUERYLUME_BUILD_CLI)
+  FetchContent_MakeAvailable(CLI11)
+endif()
 
 if(QUERYLUME_BUILD_TESTS)
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)

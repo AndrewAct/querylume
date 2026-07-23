@@ -111,6 +111,54 @@ jobs:
           | xargs -0 clang-tidy -p build-ci-analysis
           --warnings-as-errors='*'
 
+  package-smoke:
+    name: Embedding and installed-package smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools and consumer dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang ninja-build nlohmann-json3-dev
+
+      - name: Configure core-only package
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build-ci-package -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DQUERYLUME_BUILD_CLI=OFF
+          -DQUERYLUME_BUILD_TESTS=OFF
+          -DQUERYLUME_BUILD_BENCHMARKS=OFF
+
+      - name: Build and install package
+        run: |
+          cmake --build build-ci-package
+          cmake --install build-ci-package --prefix "$RUNNER_TEMP/querylume-install"
+
+      - name: Verify add_subdirectory defaults and QueryLume::Core
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S tests/embedding -B build-ci-embedding -G Ninja
+          cmake --build build-ci-embedding
+          ./build-ci-embedding/querylume_embedding_smoke
+
+      - name: Verify find_package consumer
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S tests/install -B build-ci-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/querylume-install"
+          cmake --build build-ci-consumer
+          ./build-ci-consumer/querylume_install_smoke
+
   benchmark-smoke:
     name: Benchmark smoke test
     runs-on: ubuntu-latest

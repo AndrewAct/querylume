@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(nlohmann_json 3.11.3)
+
+include("${CMAKE_CURRENT_LIST_DIR}/QueryLumeTargets.cmake")
+set_property(
+  TARGET QueryLume::Core
+  APPEND PROPERTY INTERFACE_LINK_LIBRARIES nlohmann_json::nlohmann_json
+)
+check_required_components(QueryLume)

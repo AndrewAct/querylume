@@ -27,6 +27,14 @@ StageState SortStage::onGetNext(Row& output) {
     return StageState::kAdvanced;
 }
 
-void SortStage::onClose() noexcept { child_->close(); }
+void SortStage::onClose() noexcept {
+    child_->close();
+
+    // clear() destroys rows but may retain vector capacity. Swapping with an
+    // empty vector releases the materialized-row allocation while preserving
+    // close()'s noexcept contract.
+    std::vector<Row> empty;
+    buffer_.swap(empty);
+}
 
 }  // namespace querylume

@@ -7,11 +7,11 @@
 
 namespace querylume {
 
-// Converts a (typically optimized) logical plan into a PlanStage tree.
-// Takes `node` by mutable reference because LogicalFilter's predicate
-// Expression is uniquely owned and must be moved into the resulting
-// FilterStage (see LogicalFilter::takePredicate()); every other node's
-// data is trivially copyable. Throws
+// Consumes a (typically optimized) logical plan and converts it into a
+// PlanStage tree. Taking unique_ptr by value makes the ownership transition
+// explicit at the API boundary: after this call, callers no longer have a
+// logical tree whose uniquely-owned expressions have been moved elsewhere.
+// Throws
 // QueryLumeError(kUnsupportedLogicalNode) for any logical node kind this
 // planner does not know how to lower (defensive: the current six-kind enum
 // is exhaustively handled).
@@ -20,6 +20,7 @@ namespace querylume {
 // CollectionScanStage once the tree is built, so callers can read its
 // rows_out (documentsExamined) after execution without a generic
 // tree-search.
-std::unique_ptr<PlanStage> buildPhysicalPlan(LogicalPlanNode& node, PlanStage** leaf_scan_out = nullptr);
+std::unique_ptr<PlanStage> buildPhysicalPlan(std::unique_ptr<LogicalPlanNode> node,
+                                             PlanStage** leaf_scan_out = nullptr);
 
 }  // namespace querylume
