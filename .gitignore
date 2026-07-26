@@ -10,3 +10,7 @@ compile_commands.json
 /CLAUDE.md
 /.agents/
 /.claude/
+
+# personal
+/blog_ideas
+/docs/deep_dive_interview.md

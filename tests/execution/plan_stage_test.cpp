@@ -341,11 +341,13 @@ TEST(PlanStageExecutionGuardTest, ClosesStageWhenGetNextThrows) {
     auto closed = std::make_shared<bool>(false);
     ThrowingGetNextStage stage(closed);
 
+    // Once construction succeeds, the guard owns cleanup for the rest of this
+    // execution scope, even if getNext() terminates execution with an exception.
     {
         PlanStageExecutionGuard execution(stage);
         Row row;
         EXPECT_THROW(stage.getNext(row), QueryLumeError);
-    }
+    }  // The guard's destructor closes the stage.
 
     EXPECT_TRUE(*closed);
 }
@@ -373,9 +375,13 @@ TEST(PlanStageExecutionGuardTest, FailedOpenRollsBackPartialStageState) {
     auto closed = std::make_shared<bool>(false);
     ThrowingOpenStage stage(closed);
 
+    // A guard that throws while calling open() is never fully constructed, so
+    // its destructor cannot run. PlanStageBase::open() must close any partially
+    // opened stage tree before propagating the exception.
     EXPECT_THROW(stage.open(), QueryLumeError);
     EXPECT_TRUE(*closed);
 
+    // Rollback leaves the stage closed rather than reusable or partially open.
     Row row;
     try {
         static_cast<void>(stage.getNext(row));
