@@ -1,0 +1,27 @@
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-owning-memory,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-use-auto,
+  performance-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-braces-around-statements,
+  -bugprone-easily-swappable-parameters,
+  -performance-enum-size
+# cppcoreguidelines-pro-type-static-cast-downcast is deliberately excluded:
+# LogicalPlanNode/PlanStage use a closed kind()/stageName() tag checked
+# immediately before every static_cast downcast (see physical_planner.cpp,
+# sort_limit_to_topk_rule.cpp, logical_plan_utils.cpp, json_serialize.cpp).
+# This is the same tag-guarded-downcast pattern LLVM's classof() uses to
+# avoid RTTI; dynamic_cast would work but adds runtime cost the tag check
+# already makes unnecessary.
+# readability-braces-around-statements is deliberately excluded: this
+# codebase uses braceless one-line early-return guards
+# (`if (cond) return x;`) throughout as a deliberate style choice.
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/querylume/.*'
+FormatStyle: file

@@ -1,0 +1,38 @@
+[
+  {
+    "symbol": "AAPL",
+    "price": 211.5,
+    "volume": 1000,
+    "sector": "technology"
+  },
+  {
+    "symbol": "MSFT",
+    "price": 506.2,
+    "volume": 800,
+    "sector": "technology"
+  },
+  {
+    "symbol": "JPM",
+    "price": 289.4,
+    "volume": 1200,
+    "sector": "finance"
+  },
+  {
+    "symbol": "GOOG",
+    "price": 178.3,
+    "volume": 1500,
+    "sector": "technology"
+  },
+  {
+    "symbol": "XOM",
+    "price": 118.9,
+    "volume": 2000,
+    "sector": "energy"
+  },
+  {
+    "symbol": "BAC",
+    "price": 44.2,
+    "volume": 3000,
+    "sector": "finance"
+  }
+]

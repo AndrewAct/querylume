@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  CTEST_PARALLEL_LEVEL: 2
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debug
+            build_dir: build-ci-debug
+            build_type: Debug
+            sanitizer_option: ""
+          - name: Release
+            build_dir: build-ci-release
+            build_type: Release
+            sanitizer_option: ""
+          - name: ASan
+            build_dir: build-ci-asan
+            build_type: Debug
+            sanitizer_option: -DQUERYLUME_ENABLE_ASAN=ON
+          - name: UBSan
+            build_dir: build-ci-ubsan
+            build_type: Debug
+            sanitizer_option: -DQUERYLUME_ENABLE_UBSAN=ON
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang ninja-build
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B "${{ matrix.build_dir }}" -G Ninja
+          -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}"
+          -DQUERYLUME_BUILD_TESTS=ON
+          -DQUERYLUME_BUILD_BENCHMARKS=OFF
+          ${{ matrix.sanitizer_option }}
+
+      - name: Build
+        run: cmake --build "${{ matrix.build_dir }}"
+
+      - name: Run tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir "${{ matrix.build_dir }}" --output-on-failure
+
+  static-analysis:
+    name: Format and clang-tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang clang-format clang-tidy ninja-build
+
+      - name: Check formatting
+        run: >
+          find include src apps tests benchmarks
+          -type f \( -name '*.h' -o -name '*.cpp' \)
+          -print0
+          | xargs -0 clang-format --dry-run --Werror
+
+      - name: Configure compile database
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build-ci-analysis -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DQUERYLUME_BUILD_TESTS=OFF
+          -DQUERYLUME_BUILD_BENCHMARKS=OFF
+
+      - name: Build analysis target
+        run: cmake --build build-ci-analysis
+
+      - name: Run clang-tidy
+        run: >
+          find src apps/querylume_cli -type f -name '*.cpp' -print0
+          | xargs -0 clang-tidy -p build-ci-analysis
+          --warnings-as-errors='*'
+
+  package-smoke:
+    name: Embedding and installed-package smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools and consumer dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang ninja-build nlohmann-json3-dev
+
+      - name: Configure core-only package
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build-ci-package -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DQUERYLUME_BUILD_CLI=OFF
+          -DQUERYLUME_BUILD_TESTS=OFF
+          -DQUERYLUME_BUILD_BENCHMARKS=OFF
+
+      - name: Build and install package
+        run: |
+          cmake --build build-ci-package
+          cmake --install build-ci-package --prefix "$RUNNER_TEMP/querylume-install"
+
+      - name: Verify add_subdirectory defaults and QueryLume::Core
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S tests/embedding -B build-ci-embedding -G Ninja
+          cmake --build build-ci-embedding
+          ./build-ci-embedding/querylume_embedding_smoke
+
+      - name: Verify find_package consumer
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S tests/install -B build-ci-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/querylume-install"
+          cmake --build build-ci-consumer
+          ./build-ci-consumer/querylume_install_smoke
+
+  benchmark-smoke:
+    name: Benchmark smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang ninja-build
+
+      - name: Configure benchmark
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build-ci-benchmark -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DQUERYLUME_BUILD_TESTS=OFF
+          -DQUERYLUME_BUILD_BENCHMARKS=ON
+
+      - name: Build benchmark
+        run: cmake --build build-ci-benchmark --target sort_vs_topk_benchmark
+
+      - name: Run benchmark smoke test
+        run: >
+          ./build-ci-benchmark/benchmarks/sort_vs_topk_benchmark
+          --benchmark_filter='BM_(SortPlusLimit|TopK)/1000/10$'
+          --benchmark_min_time=0.001s

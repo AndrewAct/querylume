@@ -1,0 +1,26 @@
+[
+  {
+    "$match": {
+      "sector": {
+        "$eq": "technology"
+      },
+      "price": {
+        "$gte": 200
+      }
+    }
+  },
+  {
+    "$project": [
+      "symbol",
+      "price"
+    ]
+  },
+  {
+    "$sort": {
+      "price": -1
+    }
+  },
+  {
+    "$limit": 10
+  }
+]
